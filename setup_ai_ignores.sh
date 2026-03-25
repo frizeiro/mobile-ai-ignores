@@ -10,6 +10,7 @@ DRY_RUN=0
 BACKUP=0
 TOOLS_CSV="gemini,qwen,windsurf,jetbrains,claude,codex,copilot"
 WRITTEN_FILES=()
+CUSTOM_PATTERNS=()
 
 usage() {
   cat <<EOF
@@ -191,6 +192,15 @@ build_ignore_content() {
     append_line "# Optional heavy assets"
     append_line "fastlane/screenshots/"
     append_line "fastlane/test_output/"
+  fi
+
+  if [[ "${#CUSTOM_PATTERNS[@]}" -gt 0 ]]; then
+    append_line ""
+    append_line "# Custom patterns"
+    local pattern
+    for pattern in "${CUSTOM_PATTERNS[@]}"; do
+      append_line "$pattern"
+    done
   fi
 
   printf '%s\n' "$BUFFER"
@@ -387,47 +397,97 @@ write_ignore_file() {
   record_written_file "$path"
 }
 
-prompt_global_gitignore_update() {
+prompt_custom_patterns() {
+  [[ -t 0 && -t 1 ]] || return 0
+
+  printf 'Add custom files/folders to ignore? (one per line, empty line to finish)\n'
+  local line
+  while IFS= read -r line; do
+    line="${line//[[:space:]]/}"
+    [[ -n "$line" ]] || break
+    CUSTOM_PATTERNS+=("$line")
+    log "  + $line"
+  done
+}
+
+prompt_git_tracking() {
   local answer
-  local global_gitignore
-  local existing_rules=""
   local path
-  local appended=0
+  local appended
+  local existing_rules
+  local global_gitignore
 
   [[ "$DRY_RUN" -eq 0 ]] || return 0
   [[ "${#WRITTEN_FILES[@]}" -gt 0 ]] || return 0
   [[ -t 0 && -t 1 ]] || return 0
 
-  printf 'Add generated files to the global gitignore? [y/N] '
+  printf '\nGenerated files:\n'
+  for path in "${WRITTEN_FILES[@]}"; do
+    printf '  %s\n' "$path"
+  done
+
+  printf '\nWhat would you like to do with these files?\n'
+  printf '  1) Track in git (force-add even if globally ignored)\n'
+  printf '  2) Add paths to local .gitignore\n'
+  printf '  3) Add paths to global gitignore\n'
+  printf '  0) Skip\n'
+  printf 'Choice [0]: '
   read -r answer || return 0
 
   case "$answer" in
-    y|Y|yes|YES) ;;
-    *) return 0 ;;
+    1)
+      if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        warn "Not inside a git repository."
+        return 0
+      fi
+      for path in "${WRITTEN_FILES[@]}"; do
+        git add --force -- "$path" && log "Tracked: $path"
+      done
+      ;;
+    2)
+      appended=0
+      existing_rules=""
+      if [[ -f ".gitignore" ]]; then
+        existing_rules="$(cat ".gitignore")"
+      fi
+      for path in "${WRITTEN_FILES[@]}"; do
+        if ! grep -Fqx "$path" <<< "$existing_rules"; then
+          printf '%s\n' "$path" >> ".gitignore"
+          existing_rules+=$'\n'"$path"
+          appended=1
+          log "Added to .gitignore: $path"
+        fi
+      done
+      if [[ "$appended" -eq 0 ]]; then
+        log ".gitignore already contains all generated file rules."
+      fi
+      ;;
+    3)
+      appended=0
+      global_gitignore="$(git config --global --get core.excludesfile || true)"
+      if [[ -z "$global_gitignore" ]]; then
+        global_gitignore="$HOME/.gitignore_global"
+        git config --global core.excludesfile "$global_gitignore"
+        log "Configured global gitignore: $global_gitignore"
+      fi
+      mkdir -p "$(dirname "$global_gitignore")"
+      touch "$global_gitignore"
+      existing_rules="$(awk 'NF && $0 !~ /^[[:space:]]*#/' "$global_gitignore")"
+      for path in "${WRITTEN_FILES[@]}"; do
+        if ! grep -Fqx "$path" <<< "$existing_rules"; then
+          printf '%s\n' "$path" >> "$global_gitignore"
+          appended=1
+          log "Added to global gitignore: $path"
+        fi
+      done
+      if [[ "$appended" -eq 0 ]]; then
+        log "Global gitignore already contains all generated file rules."
+      fi
+      ;;
+    *)
+      return 0
+      ;;
   esac
-
-  global_gitignore="$(git config --global --get core.excludesfile || true)"
-  if [[ -z "$global_gitignore" ]]; then
-    global_gitignore="$HOME/.gitignore_global"
-    git config --global core.excludesfile "$global_gitignore"
-    log "Configured global gitignore: $global_gitignore"
-  fi
-
-  mkdir -p "$(dirname "$global_gitignore")"
-  touch "$global_gitignore"
-  existing_rules="$(awk 'NF && $0 !~ /^[[:space:]]*#/' "$global_gitignore")"
-
-  for path in "${WRITTEN_FILES[@]}"; do
-    if ! grep -Fqx "$path" <<< "$existing_rules"; then
-      printf '%s\n' "$path" >> "$global_gitignore"
-      appended=1
-      log "Added to global gitignore: $path"
-    fi
-  done
-
-  if [[ "$appended" -eq 0 ]]; then
-    log "Global gitignore already contains all generated file rules."
-  fi
 }
 
 parse_args() {
@@ -543,8 +603,9 @@ main() {
   log "Profile: $PROFILE"
   log "Tools: ${SELECTED_TOOLS[*]}"
 
+  prompt_custom_patterns
   generate_files
-  prompt_global_gitignore_update
+  prompt_git_tracking
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "Dry run complete."
