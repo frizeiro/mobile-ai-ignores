@@ -1,34 +1,35 @@
 # AI / CLI Ignore Setup for Mobile Projects
 
-This repository provides a shell script that can be executed directly from GitHub to generate ignore and instruction files for common AI coding tools used in Android, iOS, and Kotlin Multiplatform projects.
-
-It now generates files per tool instead of forcing the same file for every CLI.
+A shell script that generates ignore and instruction files for common AI coding tools used in Android, iOS, and Kotlin Multiplatform projects. Run it from the root of any mobile project.
 
 ## Supported tools
 
-- `Gemini` -> `.geminiignore`
-- `Qwen Code` -> `.qwenignore`
-- `Windsurf / Codeium` -> `.codeiumignore`
-- `JetBrains AI Assistant` -> `.aiignore`
-- `JetBrains AI Assistant disable switch` -> `.noai` when you opt into `noai`
-- `Claude Code` -> `.claude/settings.json`
-- `Codex / GPT-based coding workflows` -> `AGENTS.md`
-- `GitHub Copilot CLI` -> `.github/copilot-instructions.md`, `AGENTS.md` compatible guidance, and `.copilotignore`
+| Tool | File(s) generated | Aliases |
+|------|-------------------|---------|
+| `gemini` | `.geminiignore` | — |
+| `qwen` | `.qwenignore` | — |
+| `windsurf` | `.codeiumignore` | `codeium` |
+| `jetbrains` | `.aiignore` | `aiassistant`, `idea` |
+| `noai` | `.noai` | `jetbrains-noai` |
+| `claude` | `.claude/settings.json` | `anthropic` |
+| `codex` | `AGENTS.md` | `gpt`, `openai` |
+| `copilot` | `.github/copilot-instructions.md`, `.copilotignore` | `github` |
+| `all` | all of the above | — |
 
-## Why this changed
+**Default set:** `gemini,qwen,windsurf,jetbrains,claude,codex,copilot`
 
-Different tools no longer share a single universal ignore-file convention:
+The `noai` tool is opt-in. It creates a `.noai` file that disables JetBrains AI Assistant for the project entirely.
 
-- Claude Code uses project settings in `.claude/settings.json`
-- Codex and other agent-style workflows commonly use `AGENTS.md`
-- GitHub Copilot CLI supports `AGENTS.md` and `.github/copilot-instructions.md`
-- JetBrains AI Assistant supports `.aiignore` and `.noai`
+## File types
 
-Because of that, the script generates the right file type for each tool.
+The script handles two kinds of output differently:
+
+- **Ignore files** (`.geminiignore`, `.qwenignore`, `.codeiumignore`, `.aiignore`, `.copilotignore`) — always merged. Effective rules from `.gitignore` and any existing content in the target file are preserved in the output; duplicate lines are removed automatically.
+- **Instruction / config files** (`.claude/settings.json`, `AGENTS.md`, `.github/copilot-instructions.md`, `.noai`) — skipped if they already exist. Pass `--force` to overwrite, `--backup` to save a `.bak` copy before overwriting.
 
 ## Quick start
 
-Run this from the root of your project:
+Run from the root of your project:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/frizeiro/mobile-ai-ignores/main/setup_ai_ignores.sh)"
@@ -36,19 +37,22 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/frizeiro/mobile-ai-ignor
 
 ## Options
 
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/frizeiro/mobile-ai-ignores/main/setup_ai_ignores.sh)" -- --help
+```
+--profile balanced|strict   Rule intensity. Default: balanced
+--tools <csv>               Comma-separated list of tools. Default: gemini,qwen,windsurf,jetbrains,claude,codex,copilot
+--force                     Overwrite existing instruction/config files
+--backup                    Save a .bak copy before overwriting or merging any file
+--dry-run                   Preview what would be created or updated without writing anything
+-h, --help                  Show usage
 ```
 
-Main options:
+## Interactive prompts
 
-- `--profile balanced|strict`
-- `--tools gemini,qwen,windsurf,jetbrains,noai,claude,codex,copilot`
-- `--force` for non-ignore files that already exist
-- `--backup`
-- `--dry-run`
+Both prompts are skipped automatically when stdin or stdout is not a terminal (CI, piped input).
 
-During an interactive run, the script first asks for custom files or folders to add to every ignore file. Enter one pattern per line and press Enter on an empty line to finish. Any valid `.gitignore`-style pattern is accepted:
+### 1. Custom patterns
+
+Before generating files, the script asks for extra patterns to append to every ignore file. Enter one pattern per line; an empty line finishes input. Any `.gitignore`-style pattern is accepted.
 
 ```
 Add custom files/folders to ignore? (one per line, empty line to finish)
@@ -58,9 +62,18 @@ internal-docs/
              ← empty line to finish
 ```
 
-At the end of an interactive run, the script lists the written files and asks what to do with them:
+Custom patterns are appended as a dedicated `# Custom patterns` section at the end of each ignore file, after the generated rules.
+
+### 2. Git tracking
+
+After writing files, the script lists what was written and asks how to handle them:
 
 ```
+Generated files:
+  .geminiignore
+  .qwenignore
+  ...
+
 What would you like to do with these files?
   1) Track in git (force-add even if globally ignored)
   2) Add paths to local .gitignore
@@ -69,9 +82,9 @@ What would you like to do with these files?
 Choice [0]:
 ```
 
-- **1 — Track in git:** runs `git add --force` on each file so they are staged for commit even if a global gitignore would normally exclude them. Useful when you want these config files committed to the repository.
-- **2 — Local .gitignore:** appends each file path to the project's `.gitignore`, keeping them out of version control for everyone on the team.
-- **3 — Global gitignore:** appends each path to your user-level gitignore (`core.excludesfile`), keeping them untracked on your machine only without affecting other contributors.
+- **1 — Track in git:** runs `git add --force` on each file, staging them for commit even if a global gitignore would otherwise exclude them.
+- **2 — Local .gitignore:** appends each path to the project's `.gitignore`, keeping the files untracked for everyone on the team.
+- **3 — Global gitignore:** appends each path to your user-level gitignore (`core.excludesfile`), keeping them untracked on your machine only without touching project files. If no global gitignore is configured, it creates `~/.gitignore_global` and sets it via `git config --global core.excludesfile`.
 - **0 / Enter — Skip:** does nothing.
 
 ## Examples
@@ -82,21 +95,21 @@ Generate the default set:
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/frizeiro/mobile-ai-ignores/main/setup_ai_ignores.sh)"
 ```
 
-Generate only Gemini, Qwen, Windsurf and Codex files:
+Generate only Gemini, Qwen, Windsurf and Codex files with the strict profile:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/frizeiro/mobile-ai-ignores/main/setup_ai_ignores.sh)" -- \
-  --tools gemini,qwen,windsurf,codex
+  --profile strict --tools gemini,qwen,windsurf,codex
 ```
 
-Preview changes without writing files:
+Preview all changes without writing files:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/frizeiro/mobile-ai-ignores/main/setup_ai_ignores.sh)" -- \
   --tools all --profile strict --dry-run
 ```
 
-Overwrite existing non-ignore files and keep backups:
+Overwrite existing instruction files and keep backups:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/frizeiro/mobile-ai-ignores/main/setup_ai_ignores.sh)" -- \
@@ -105,25 +118,18 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/frizeiro/mobile-ai-ignor
 
 ## Profiles
 
-`balanced`
+Both profiles always ignore:
 
-- Hides secrets and generated build output
-- Keeps potentially useful project assets and most editor config visible
+- **Security and secrets:** `*.jks`, `*.keystore`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `.env`, `.env.*`, `local.properties`, `google-services.json`, `GoogleService-Info.plist`, `service-account-key.json`, `signing-key.json`, `Secrets.apple`
+- **Android / Gradle:** `.gradle/`, `**/build/`, `captures/`, `.externalNativeBuild/`, `.cxx/`, `*.apk`, `*.aab`
+- **Apple platforms:** `DerivedData/`, `*.xcuserstate`, `*.moved-aside`, `*.dSYM/`, `*.xcarchive`, `*.ipa`, `.swiftpm/`, `.build/`
+- **Kotlin Multiplatform:** `.kotlin/`, `.konan/`
+- **Coverage, logs, caches:** `coverage/`, `*.hprof`, `*.class`, `*.pyc`, `*.log`
+- **Generated dependency trees:** `vendor/bundle/`
 
-`strict`
+**`balanced`** additionally hides only the noisy parts of `.idea/` (`workspace.xml`, `tasks.xml`, `caches/`, `shelf/`, `httpRequests/`), `.DS_Store`, `Thumbs.db`, and Fastlane output (`fastlane/screenshots/`, `fastlane/test_output/`). Project source, assets, and most editor config remain visible.
 
-- Also hides heavy media, framework bundles, dependency trees, and more editor files
-- Better for privacy and token efficiency, but more aggressive
-
-## Notes
-
-- Ignore files are merged in sections: effective rules from `.gitignore`, preserved local target rules, the generated rules from the script, and finally any custom patterns you entered
-- Existing non-ignore files are not overwritten unless you pass `--force`
-- If you pass `--backup`, replaced or merged files are copied to `<name>.bak`
-- Interactive runs prompt to track, locally ignore, or globally ignore the written files; the default is skip
-- `gpt` and `openai` are accepted as aliases of `codex`
-- `codeium` is accepted as an alias of `windsurf`
-- `noai` or `jetbrains-noai` creates a project-level `.noai` file that disables JetBrains AI Assistant entirely
+**`strict`** additionally hides the entire `.idea/` and `.vscode/` directories, `Pods/`, `node_modules/`, `*.framework/`, `*.xcframework/`, and all image (`*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp`), video (`*.mov`, `*.mp4`), audio (`*.wav`, `*.mp3`), and document (`*.pdf`) assets. Better for privacy and token efficiency, but more aggressive.
 
 ## Sources
 
